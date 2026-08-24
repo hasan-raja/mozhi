@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: mozhi
       POSTGRES_DB: mozhi
     ports:
-      - "5432:5432"
+      # host 5433 → container 5432 (5432 is taken by a local Windows Postgres install)
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:

@@ -9,7 +9,6 @@ build/
 
 # Env & secrets
 .env
-.env.*
 
 # Node
 node_modules/
