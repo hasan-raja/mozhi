@@ -1,4 +1,4 @@
-"""Shared pytest fixtures."""
+"""Shared pytest fixtures and markers."""
 
 from collections.abc import Iterator
 

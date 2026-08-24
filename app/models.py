@@ -122,3 +122,25 @@ class Segment(Base):
     __table_args__ = (
         Index("ix_segments_job_index", "job_id", "index", unique=True),
     )
+
+
+class StageCompletion(Base):
+    """Idempotency ledger — at-least-once delivery means a task MAY run twice;
+    this table guarantees completing a stage twice is impossible.
+
+    The UNIQUE constraint is the enforcement mechanism: racing workers cannot
+    both insert. DB-level > app-level because it holds across processes.
+    """
+
+    __tablename__ = "stage_completions"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True,
+                                          default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    stage: Mapped[str] = mapped_column(String(32), nullable=False)
+    completed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                   server_default=func.now())
+
+    __table_args__ = (
+        Index("ux_stage_completions_job_stage", "job_id", "stage", unique=True),
+    )
