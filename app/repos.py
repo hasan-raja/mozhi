@@ -68,6 +68,29 @@ class JobRepo:
         )
         return list(result.scalars().all())
 
+    async def claim_next_pending(self) -> Job | None:
+        """Atomically hand the oldest PENDING job to one worker.
+
+        SELECT ... FOR UPDATE SKIP LOCKED: concurrent workers never grab the
+        same row — the lock skips rows another transaction already holds, so
+        there's no waiting and no double-claim. This is the standard pattern
+        for job queues built on Postgres.
+        """
+        result = await self.session.execute(
+            select(Job)
+            .where(Job.status == JobStatus.PENDING)
+            .order_by(Job.created_at)
+            .limit(1)
+            .with_for_update(skip_locked=True)
+        )
+        job = result.scalars().first()
+        if job is None:
+            return None
+        job.transition(JobStatus.RUNNING)
+        job.heartbeat_at = datetime.now(UTC)
+        await self.session.commit()
+        return job
+
     async def mark_stuck_failed(self, job_ids: list[uuid.UUID]) -> None:
         """Send stuck jobs to FAILED with a reason (retry gateway may revive them)."""
         if not job_ids:

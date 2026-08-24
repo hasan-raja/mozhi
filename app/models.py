@@ -144,3 +144,58 @@ class StageCompletion(Base):
     __table_args__ = (
         Index("ux_stage_completions_job_stage", "job_id", "stage", unique=True),
     )
+
+
+class Asset(Base):
+    """A piece of media: uploaded source or generated artifact.
+
+    Two roles:
+    - role="source": the user's upload (video/audio in)
+    - role="<stage>": per-stage outputs (extract wav, tts wavs, final mp4)
+    Paths follow the blob layout jobs/{job_id}/{stage}/{name} — resumable and
+    debuggable; the DB row is metadata, the file lives in blob storage.
+    """
+
+    __tablename__ = "assets"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True,
+                                          default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID] = mapped_column(ForeignKey("jobs.id"), nullable=False)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)  # source|extract|tts|final...
+    storage_path: Mapped[str] = mapped_column(String(500), nullable=False)
+    mime_type: Mapped[str | None] = mapped_column(String(100))
+    size_bytes: Mapped[int | None]
+    duration_ms: Mapped[int | None]
+    checksum_sha256: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_assets_job_role", "job_id", "role"),
+    )
+
+
+class UsageRecord(Base):
+    """Metering row — one per billable API action.
+
+    Foundation of mozhi-sdk metering: every stage run appends usage so billing
+    is a query, never an afterthought. Immutable by convention (no updates).
+    """
+
+    __tablename__ = "usage_records"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True,
+                                          default=uuid.uuid4)
+    job_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("jobs.id"))
+    api_key_id: Mapped[str | None] = mapped_column(String(64))  # tenant identity (Day 5 SDK)
+    engine: Mapped[str] = mapped_column(String(32), nullable=False)  # local|sarvam|openrouter|mock
+    operation: Mapped[str] = mapped_column(String(32), nullable=False)  # asr|translate|tts
+    quantity: Mapped[float] = mapped_column(default=0.0)  # seconds audio / chars / requests
+    unit: Mapped[str] = mapped_column(String(16), nullable=False)  # audio_sec|chars|requests
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True),
+                                                 server_default=func.now())
+
+    __table_args__ = (
+        Index("ix_usage_apikey_created", "api_key_id", "created_at"),
+        Index("ix_usage_job", "job_id"),
+    )
