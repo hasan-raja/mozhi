@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# Env & secrets
+.env
+.env.*
+
+# Node
+node_modules/
+web/dist/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Media fixtures — keep small ones via git-lfs or commit deliberately
+media/*.mp4
+!media/fixtures/*.mp4
