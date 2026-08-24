@@ -46,24 +46,41 @@ End of each day: push, write NOTES.md entry, run full test suite.
 ---
 
 ## DAY 3 — Pipeline Spine: Extract → VAD → ASR → Translate
-11. Engine abstraction: `Engine` protocol; `SarvamEngine`, `OpenRouterFallbackEngine`, `MockEngine`. Registry + config-selected.
+11. Engine abstraction: `Engine` protocol; `LocalEngine` (free/open, PRIMARY for dev),
+    `SarvamEngine` (demo/upgrade path), `OpenRouterFallbackEngine`, `MockEngine` (CI).
+    Registry + config-selected via `MOZHI_ENGINE_MODE=local|sarvam|mock`.
+    **Strategy: build & test everything on free/local engines first; flip to Sarvam
+    only for the final demo recording (₹1,000 free credits cover it).**
     - Lesson: ports-and-adapters so ML providers are swappable; MockEngine = why your CI needs no API keys.
 12. Stage 1–2: ffmpeg audio extraction (16k mono wav) + VAD (silero) segmentation. soundfile I/O utilities.
     - Lesson: sample-rate/format normalization FIRST prevents a class of downstream bugs.
-13. Stage 3: faster-whisper local ASR, batched segments, GPU/CPU fallback, word timestamps stored.
+13. Stage 3: faster-whisper local ASR (FREE, runs on CPU), batched segments, word timestamps stored.
     - Lesson: CPU-bound work in async world → run_in_executor / dedicated worker pool; never block the loop.
-14. Stage 4: translation via Sarvam w/ OpenRouter fallback + LLM prompt for context window (episode-level glossary).
-    - Lesson: fallback orchestration + structured output parsing; provider failure budgeting.
-15. End-to-end happy path on one real En→Ta clip; store artifacts (segments json, per-segment audio) in blob layout.
-    - Commit: `feat(pipeline): e2e extract-vad-asr-translate on fixture media`
+14. Stage 4 translation — free-first ladder:
+    a. **Primary (dev): IndicTrans2** (AI4Bharat) local model — built FOR Indic languages, free
+    b. **Fallback: OpenRouter** Gemini Flash free tier
+    c. **Demo upgrade: Sarvam Translate** (₹20/10k chars — pennies from free credits)
+    Plus LLM prompt for episode-level glossary consistency.
+    - Lesson: fallback orchestration + provider failure budgeting; quality/cost tradeoffs documented in docs/engines.md.
+15. End-to-end happy path on one real En→Ta clip using LocalEngine; store artifacts (segments json, per-segment audio).
+    Commit: `feat(pipeline): e2e extract-vad-asr-translate on fixture media`
     - Lesson: artifact storage layout (job_id/stage/) = resumability + debuggability.
+
+## DAY 3.5 — docs/engines.md provider benchmark (~1h)
+- Same 3 test paragraphs through each engine: local vs Sarvam vs OpenRouter
+- Record: translation quality notes, latency, cost per minute of dubbed audio
+- This table IS interview material: "I evaluated providers with data."
 
 **Interview story:** "Design decisions in making ML providers pluggable" + live demo of pipeline.
 
 ---
 
 ## DAY 4 — TTS, QC, Stitch (finish the pipeline)
-16. TTS stage: Sarvam TTS engine, per-segment synthesis, tempo matching to original segment duration (time-stretch factor calc).
+16. TTS stage — free-first ladder:
+    a. **Primary (dev): AI4Bharat IndicTTS** local (free, Indic-optimized)
+    b. **Fallback: Coqui XTTS-v2** or Piper
+    c. **Demo upgrade: Sarvam Bulbul v2** (₹15/10k chars from free credits)
+    Per-segment synthesis, tempo matching to original segment duration.
 17. QC stage (JD-critical): SNR check (librosa), duration-ratio score, loudness analysis → guided `ffmpeg loudnorm` normalization, pronunciation spot-check via whisper round-trip similarity score.
     - Lessons: objective QC gates turn "sounds fine" into numbers; round-trip ASR as cheap pronunciation verification.
 18. QC feedback loop: failed QC → auto-retry with adjusted parameters (slower TTS rate), max N attempts → flag human review.
