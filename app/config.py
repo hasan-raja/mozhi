@@ -18,6 +18,11 @@ class Settings(BaseSettings):
     # Broker
     redis_url: str = "redis://localhost:6379/0"
 
+    # ML engines (used from Day 3 onward)
+    sarvam_api_key: str = ""
+    openrouter_api_key: str = ""
+    engine_mode: str = "mock"  # sarvam | mock
+
 
 @lru_cache
 def get_settings() -> Settings:
