@@ -19,7 +19,7 @@ _whisper_model: Any = None  # cached process-wide
 def _get_whisper() -> Any:
     global _whisper_model
     if _whisper_model is None:
-        from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+        from faster_whisper import WhisperModel
 
         # base model: ~150MB download on first use; CPU-friendly
         _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")

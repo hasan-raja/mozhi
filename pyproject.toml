@@ -58,3 +58,10 @@ ignore_missing_imports = true
 follow_untyped_imports = true
 # Celery is fully untyped — strict checks are impossible against it.
 disable_error_code = ["no-untyped-call", "no-untyped-def", "untyped-decorator", "misc", "no-any-return"]
+
+# Heavy optional ML deps (the 'vad' extra) — absent in CI, present locally.
+# Per-module overrides suppress ALL codes for them regardless of install state.
+[[tool.mypy.overrides]]
+module = ["silero_vad", "silero_vad.*", "torch", "torch.*", "faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
+follow_untyped_imports = true

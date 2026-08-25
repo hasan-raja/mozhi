@@ -59,7 +59,7 @@ _vad_utils = None
 def _get_vad() -> tuple[Any, Any]:
     global _vad_model, _vad_utils
     if _vad_model is None:
-        from silero_vad import (  # type: ignore[import-untyped]
+        from silero_vad import (
             get_speech_timestamps,
             load_silero_vad,
         )
