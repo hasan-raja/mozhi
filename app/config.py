@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     debug: bool = False
 
     # Database
-    database_url: str = "postgresql+asyncpg://mozhi:mozhi@localhost:5432/mozhi"
+    database_url: str = "postgresql+asyncpg://mozhi:mozhi@localhost:5433/mozhi"
 
     # Broker
     redis_url: str = "redis://localhost:6379/0"
