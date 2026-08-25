@@ -11,8 +11,6 @@ import random
 from collections.abc import Callable
 from typing import Any
 
-from celery import Task
-
 from app.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -36,20 +34,22 @@ def stage_task(stage: str) -> Callable[[Callable[..., Any]], Any]:
     - no retry on permanent errors (fail fast)
     """
 
-    def decorator(fn: Callable[..., Any]) -> Any:
+    def decorator(fn: Callable[[str], Any]) -> Any:
         @celery_app.task(name=f"mozhi.{stage}.run", bind=True, max_retries=MAX_RETRIES)
-        def inner(self: Task, job_id: str, *args: Any, **kwargs: Any) -> Any:
+        def inner(task_self: Any, job_id: str, *args: Any, **kwargs: Any) -> Any:
+            # bind=True → Celery passes the task instance first; we drop it so
+            # stage bodies stay pure (job_id-only) and tests call them directly.
             try:
-                return fn(self, job_id, *args, **kwargs)
+                return fn(job_id, *args, **kwargs)
             except RETRYABLE_EXCEPTIONS as exc:
-                countdown = BASE_BACKOFF_SECONDS * (2**self.request.retries) * (
+                countdown = BASE_BACKOFF_SECONDS * (2**task_self.request.retries) * (
                     1 + random.random() / 2
                 )
                 logger.warning(
                     "stage=%s job=%s transient error=%r — retry %d/%d in %.1fs",
-                    stage, job_id, exc, self.request.retries + 1, MAX_RETRIES, countdown,
+                    stage, job_id, exc, task_self.request.retries + 1, MAX_RETRIES, countdown,
                 )
-                raise self.retry(exc=exc, countdown=countdown) from exc
+                raise task_self.retry(exc=exc, countdown=countdown) from exc
             except Exception as exc:  # permanent — do not retry
                 logger.exception("stage=%s job=%s permanent failure", stage, job_id)
                 raise PermanentStageError(f"{stage}: {exc}") from exc

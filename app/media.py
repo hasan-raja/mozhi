@@ -63,7 +63,6 @@ def _get_vad() -> tuple[Any, Any]:
             get_speech_timestamps,
             load_silero_vad,
         )
-
         _vad_model = load_silero_vad()
         _vad_utils = get_speech_timestamps
     return _vad_model, _vad_utils

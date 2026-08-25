@@ -16,6 +16,12 @@ dependencies = [
     "soundfile>=0.14.0",
 ]
 
+[project.optional-dependencies]
+vad = [
+    "silero-vad>=6.2.1",
+    "torch>=2.13.0",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.3",
@@ -42,7 +48,7 @@ select = ["E", "F", "I", "UP", "B", "ASYNC"]
 "alembic/versions/*" = ["E501"]
 
 [tool.mypy]
-python_version = "3.11"
+python_version = "3.12"
 strict = true
 plugins = []
 
