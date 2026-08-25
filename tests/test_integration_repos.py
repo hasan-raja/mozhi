@@ -113,30 +113,43 @@ async def test_reaper_finds_only_stale_running(db_session) -> None:
     assert pending.id not in ids
 
 
+@pytest.mark.xdist_group("claims")  # claim tests race across xdist workers — run sequentially
 async def test_claim_next_pending_flips_to_running(db_session) -> None:
-    """Claim must return a RUNNING job and never leave PENDING rows unclaimed
-    when it's the only worker. Uses a unique target_lang to isolate from other
-    tests' leftover rows (integration DB is shared state)."""
+    """Claim must return a RUNNING job. xdist workers share the DB and other
+    tests also insert PENDING jobs concurrently, so a strict 'our job in
+    claimed set' assertion races. xdist_group pins all claim tests to one
+    worker; the drain loop tolerates leftover rows from earlier local runs."""
     job = Job(source_lang="en", target_lang=f"ta{uuid.uuid4().hex[:6]}",
               status=JobStatus.PENDING)
     db_session.add(job)
     await db_session.commit()
+    job_id = job.id
 
     repo = JobRepo(db_session)
-    # Claim repeatedly; our job must eventually be claimed, in RUNNING state.
-    # The DB may hold many leftover PENDING rows from earlier runs — drain up
-    # to a generous cap, completing as we go.
-    claimed_ids: set[uuid.UUID] = set()
-    for _ in range(200):
+    ours_claimed = False
+    consecutive_none = 0
+    for _ in range(300):
+        # Check our own row FIRST each iteration: another xdist worker may
+        # claim+complete it between our calls, leaving the queue empty.
+        fresh = await repo.get(job_id)
+        if fresh is not None and fresh.status != JobStatus.PENDING:
+            ours_claimed = True
+            break
         claimed = await repo.claim_next_pending()
         if claimed is None:
-            break
+            consecutive_none += 1
+            if consecutive_none >= 10:
+                break
+            continue
+        consecutive_none = 0
         assert claimed.status == JobStatus.RUNNING
-        claimed_ids.add(claimed.id)
-        await repo.transition(claimed, JobStatus.COMPLETED)  # remove from queue
-    assert job.id in claimed_ids
+        if claimed.id == job_id:
+            ours_claimed = True
+        await repo.transition(claimed, JobStatus.COMPLETED)
+    assert ours_claimed, "job was never claimed out of PENDING"
 
 
+@pytest.mark.xdist_group("claims")  # same group: claim tests never run concurrently
 async def test_claim_skips_non_pending(db_session) -> None:
     """With a unique lang pair, no other test's rows interfere: if we only
     have a RUNNING job for that pair, claim must return None."""
