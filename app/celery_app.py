@@ -37,4 +37,11 @@ celery_app.conf.update(
     accept_content=["json"],
     timezone="UTC",
     enable_utc=True,
+    # Beat schedule — the reaper sweeps every minute
+    beat_schedule={
+        "reaper-sweep": {
+            "task": "mozhi.reaper.sweep",
+            "schedule": 60.0,
+        },
+    },
 )

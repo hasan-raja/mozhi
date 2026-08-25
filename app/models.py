@@ -34,7 +34,14 @@ class JobStatus(enum.StrEnum):
 # Legal transitions — anything else raises InvalidTransition at app level.
 VALID_TRANSITIONS: dict[JobStatus, set[JobStatus]] = {
     JobStatus.PENDING: {JobStatus.RUNNING, JobStatus.CANCELLED},
-    JobStatus.RUNNING: {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED},
+    # RUNNING → DEAD_LETTERED: the reaper direct-DLQs jobs whose attempts are
+    # exhausted (no point bouncing through FAILED just to fail again).
+    JobStatus.RUNNING: {
+        JobStatus.COMPLETED,
+        JobStatus.FAILED,
+        JobStatus.DEAD_LETTERED,
+        JobStatus.CANCELLED,
+    },
     JobStatus.FAILED: {JobStatus.PENDING, JobStatus.DEAD_LETTERED},  # retry or DLQ
     JobStatus.DEAD_LETTERED: set(),
     JobStatus.COMPLETED: set(),

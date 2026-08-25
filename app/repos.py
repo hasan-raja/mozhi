@@ -105,6 +105,9 @@ class JobRepo:
             )
         )
         await self.session.commit()
+        # Bulk UPDATE bypasses the ORM identity cache — expire so subsequent
+        # repo.get() calls see the new state (same gotcha as heartbeat()).
+        self.session.expire_all()
 
 
 class StageCompletionRepo:

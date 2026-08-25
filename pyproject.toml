@@ -46,7 +46,7 @@ strict = true
 plugins = []
 
 [[tool.mypy.overrides]]
-module = ["celery", "celery.*", "app.celery_app", "app.task_base"]
+module = ["celery", "celery.*", "app.celery_app", "app.task_base", "app.reaper"]
 ignore_missing_imports = true
 follow_untyped_imports = true
 # Celery is fully untyped — strict checks are impossible against it.
