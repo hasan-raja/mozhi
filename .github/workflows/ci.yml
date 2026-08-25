@@ -8,6 +8,36 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: mozhi
+          POSTGRES_PASSWORD: mozhi
+          POSTGRES_DB: mozhi
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U mozhi -d mozhi"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      MOZHI_DATABASE_URL: postgresql+asyncpg://mozhi:mozhi@localhost:5432/mozhi
+      MOZHI_REDIS_URL: redis://localhost:6379/0
+      MOZHI_ENGINE_MODE: mock
+
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
@@ -20,4 +50,4 @@ jobs:
       - name: Typecheck
         run: uv run mypy app
       - name: Test
-        run: uv run pytest -n auto -q
+        run: uv run pytest -n auto --dist loadgroup -q
