@@ -59,7 +59,7 @@ _vad_utils = None
 def _get_vad() -> tuple[Any, Any]:
     global _vad_model, _vad_utils
     if _vad_model is None:
-        from silero_vad import (  # type: ignore[import-not-found]
+        from silero_vad import (  # type: ignore[import-untyped]
             get_speech_timestamps,
             load_silero_vad,
         )
@@ -70,7 +70,7 @@ def _get_vad() -> tuple[Any, Any]:
 
 def _vad_sync(wav_path: str) -> list[dict[str, int]]:
     import soundfile as sf  # type: ignore[import-untyped]
-    import torch  # type: ignore[import-not-found]
+    import torch
 
     model, get_ts = _get_vad()
     wav, sr = sf.read(wav_path, dtype="float32")

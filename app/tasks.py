@@ -112,10 +112,11 @@ def run_asr(self: Any, job_id: str) -> dict[str, Any]:
 
 @stage_task("translate")
 def run_translate(self: Any, job_id: str) -> dict[str, Any]:
-    """Sarvam translate with OpenRouter fallback."""
-    logger.info("translate job=%s", job_id)
-    # TODO(Day 3 step 14): IndicTrans2 primary, OpenRouter fallback
-    return {"job_id": job_id, "stage": "translate"}
+    """Translate transcript segments → translated.json (engine per mode)."""
+    from app.stages.translate_stage import run_translate as _run
+
+    result: dict[str, Any] = _run(self, job_id)
+    return result
 
 
 @stage_task("tts")
