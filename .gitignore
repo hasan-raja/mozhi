@@ -28,3 +28,19 @@ Thumbs.db
 # Media fixtures — keep small ones via git-lfs or commit deliberately
 media/*.mp4
 !media/fixtures/*.mp4
+
+# Pipeline artifacts — generated per job, never versioned
+data/
+*.wav
+*.mp3
+*.mp4
+*.m4a
+*.mkv
+# ...except deliberate small fixtures (whitelist pattern):
+!tests/fixtures/**
+!media/fixtures/**
+
+# Whisper / ML model caches
+models/
+.cache/
+
