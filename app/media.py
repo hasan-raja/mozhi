@@ -69,7 +69,7 @@ def _get_vad() -> tuple[Any, Any]:
 
 
 def _vad_sync(wav_path: str) -> list[dict[str, int]]:
-    import soundfile as sf  # type: ignore[import-untyped]
+    import soundfile as sf
     import torch
 
     model, get_ts = _get_vad()
