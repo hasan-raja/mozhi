@@ -16,7 +16,7 @@ from typing import Any
 
 from app.engine_registry import get_engines
 from app.pipeline_stages import STAGE_NAMES
-from app.task_base import PermanentStageError, run_async, stage_task
+from app.task_base import PermanentStageError, run_async
 
 logger = logging.getLogger(__name__)
 
@@ -32,12 +32,12 @@ def _job_dir(job_id: str) -> Path:
     return DATA_ROOT / "jobs" / job_id
 
 
-@stage_task("translate")
-def run_translate(self: Any, job_id: str) -> dict[str, Any]:
+def run_translate(job_id: str) -> dict[str, Any]:
     """Translate each transcript segment into target_lang.
 
     Reads jobs/{id}/transcript.json → writes jobs/{id}/translated.json with
     the same segment structure plus 'translated_text' per segment.
+    NOTE: no @stage_task here — this is the pure body; app.tasks.py wraps it.
     """
     job_dir = _job_dir(job_id)
     transcript_path = job_dir / "transcript.json"

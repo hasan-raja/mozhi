@@ -113,18 +113,19 @@ def run_asr(self: Any, job_id: str) -> dict[str, Any]:
 @stage_task("translate")
 def run_translate(self: Any, job_id: str) -> dict[str, Any]:
     """Translate transcript segments → translated.json (engine per mode)."""
-    from app.stages.translate_stage import run_translate as _run
+    from app.stages.translate_stage import run_translate as _body
 
-    result: dict[str, Any] = _run(self, job_id)
+    result: dict[str, Any] = _body(job_id)
     return result
 
 
 @stage_task("tts")
 def run_tts(self: Any, job_id: str) -> dict[str, Any]:
-    """Per-segment TTS synthesis with tempo matching."""
-    logger.info("tts job=%s", job_id)
-    # TODO(Day 4): IndicTTS / Sarvam Bulbul
-    return {"job_id": job_id, "stage": "tts"}
+    """Per-segment TTS synthesis with tempo tracking."""
+    from app.stages.tts_stage import run_tts as _body
+
+    result: dict[str, Any] = _body(job_id)
+    return result
 
 
 @stage_task("qc")

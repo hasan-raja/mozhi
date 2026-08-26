@@ -28,6 +28,12 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    from app.api_job_status import router as job_status_router
+    from app.api_jobs import router as jobs_router
+
+    app.include_router(jobs_router)
+    app.include_router(job_status_router)
+
     @app.get("/healthz", tags=["ops"])
     async def healthz() -> dict[str, str]:
         return {"status": "ok"}

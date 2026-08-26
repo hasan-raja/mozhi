@@ -23,7 +23,7 @@ def test_mock_translate_writes_translated_json(tmp_path: Path, monkeypatch) -> N
     monkeypatch.chdir(tmp_path)
     _seed_transcript(job_id)
 
-    result = run_translate.__wrapped__(None, job_id)  # type: ignore[attr-defined]
+    result = run_translate(job_id)
 
     assert result["segments"] == 2
     out = tmp_path / "data" / "jobs" / job_id / "translated.json"
@@ -37,4 +37,4 @@ def test_missing_transcript_raises_permanent(tmp_path: Path, monkeypatch) -> Non
 
     monkeypatch.chdir(tmp_path)
     with pytest.raises(PermanentStageError):
-        run_translate.__wrapped__(None, "nonexistentjob")  # type: ignore[attr-defined]
+        run_translate("nonexistentjob")
