@@ -15,6 +15,7 @@ dependencies = [
     "httpx>=0.27",
     "soundfile>=0.14.0",
     "edge-tts>=7.2.8",
+    "faster-whisper>=1.2.1",
 ]
 
 [project.optional-dependencies]
@@ -68,6 +69,8 @@ disable_error_code = ["no-untyped-call", "no-untyped-def", "untyped-decorator", 
 # Heavy optional ML deps (the 'vad' extra) — absent in CI, present locally.
 # Per-module overrides suppress ALL codes for them regardless of install state.
 [[tool.mypy.overrides]]
-module = ["silero_vad", "silero_vad.*", "torch", "torch.*", "faster_whisper", "faster_whisper.*"]
+module = ["app.media", "app.engines.local"]
 ignore_missing_imports = true
-follow_untyped_imports = true
+# silero_vad lacks __all__ (attr-defined), torch is untyped; these modules
+# are the ONLY ones importing them, so scoping the leniency here contains it.
+disable_error_code = ["attr-defined", "no-untyped-call", "import-untyped", "import-not-found"]
