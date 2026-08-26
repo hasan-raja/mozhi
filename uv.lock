@@ -1214,6 +1214,8 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "pytest-xdist" },
     { name = "ruff" },
+    { name = "silero-vad" },
+    { name = "torch" },
 ]
 
 [package.metadata]
@@ -1242,6 +1244,8 @@ dev = [
     { name = "pytest-asyncio", specifier = ">=0.24" },
     { name = "pytest-xdist", specifier = ">=3.6" },
     { name = "ruff", specifier = ">=0.6" },
+    { name = "silero-vad", specifier = ">=6.2.1" },
+    { name = "torch", specifier = ">=2.13.0" },
 ]
 
 [[package]]
