@@ -31,6 +31,48 @@ def _run_ffmpeg_sync(args: list[str]) -> str:
     return proc.stdout
 
 
+def ffmpeg_concat_wavs(wav_files: list[Path], output: Path) -> None:
+    """Concatenate WAV files in order using ffmpeg concat filter.
+
+    All input WAVs must have identical format (sample rate, channels, codec).
+    """
+    if not wav_files:
+        raise FFmpegError("no wav files to concatenate")
+
+    args = ["-y"]
+    # Build -i file0 -i file1 -i file2 ...
+    for f in wav_files:
+        args.extend(["-i", str(f)])
+    # Build concat filter: [0:a][1:a][2:a]concat=n=3:v=0:a=1[out]
+    filter_inputs = "".join(f"[{i}:a]" for i in range(len(wav_files)))
+    n = len(wav_files)
+    filter_complex = f"{filter_inputs}concat=n={n}:v=0:a=1[out]"
+
+    args.extend([
+        "-filter_complex", filter_complex,
+        "-map", "[out]",
+        str(output),
+    ])
+    _run_ffmpeg_sync(args)
+
+
+def ffmpeg_mux_audio_on_video(
+    video_path: str, audio_path: str, output_path: str
+) -> None:
+    """Replace the audio track of a video with a new audio file."""
+    args = [
+        "-i", video_path,
+        "-i", audio_path,
+        "-c:v", "copy",               # keep original video stream
+        "-c:a", "aac",                # re-encode audio to AAC (universally compatible)
+        "-b:a", "128k",
+        "-shortest",
+        "-y",
+        output_path,
+    ]
+    _run_ffmpeg_sync(args)
+
+
 async def extract_audio(
     input_path: str, out_wav: str, sample_rate: int = 16000
 ) -> str:

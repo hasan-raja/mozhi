@@ -140,7 +140,6 @@ def run_qc(self: Any, job_id: str) -> dict[str, Any]:
 def run_stitch(self: Any, job_id: str) -> dict[str, Any]:
     """Concat audio segments, mux onto video, subtitles."""
     logger.info("stitch job=%s", job_id)
-    # TODO(Day 4)
-    if not job_id:
-        raise PermanentStageError("stitch requires job_id")
-    return {"job_id": job_id, "stage": "stitch", "output": f"jobs/{job_id}/final.mp4"}
+    from app.stages.stitch_stage import run_stitch as _body
+    result: dict[str, Any] = _body(job_id)
+    return result
