@@ -58,9 +58,11 @@ class LocalTranscriptionEngine:
 class LocalTranslationEngine:
     """IndicTrans2-backed translation.
 
-    Lazy + graceful: if the model isn't downloaded yet, raises a clear error
-    pointing at the setup docs instead of an opaque ImportError.
+    `usable = False` until the IndicTrans2 weights are set up — the registry
+    sees this and falls back to OpenRouter automatically (free-first ladder).
     """
+
+    usable: bool = False
 
     async def translate(self, texts: list[str], target_lang: str) -> list[str]:
         try:

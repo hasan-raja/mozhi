@@ -99,7 +99,16 @@ def get_engines() -> dict[str, object]:
     if mode == "local":
         from app.engines.local import get_local_engines
 
-        return get_local_engines()
+        engines: dict[str, object] = get_local_engines()
+        # Free-first fallback ladder for translation: IndicTrans2 (heavy local
+        # model) → OpenRouter LLM (light, free tier). If the local translator
+        # isn't usable, swap in OpenRouter transparently.
+        tr = engines.get("translate")
+        if tr is not None and getattr(tr, "usable", True) is False:
+            from app.engines.openrouter import OpenRouterTranslationEngine
+
+            engines["translate"] = OpenRouterTranslationEngine()
+        return engines
     if mode == "sarvam":
         from app.engines.sarvam_engine import get_sarvam_engines
 

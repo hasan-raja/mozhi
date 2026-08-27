@@ -1,10 +1,10 @@
 .PHONY: api worker lint fmt typecheck test ci
 
 api:
-	uv run uvicorn app.asgi:app --reload --port 8000
+	UV_LINK_MODE=copy uv run uvicorn app.asgi:app --reload --port 8000
 
 worker:
-	uv run celery -A app.tasks.celery_app worker -Q extract,vad,asr,translate,tts,qc,stitch -l info
+	UV_LINK_MODE=copy uv run celery -A app.celery_app.celery_app worker -Q extract,vad,asr,translate,tts,qc,stitch -l info
 
 lint:
 	uv run ruff check app tests
@@ -19,3 +19,9 @@ test:
 	uv run pytest -n auto
 
 ci: lint typecheck test
+
+# WSL note: the repo lives on /mnt/f (Windows drive). uv can't hardlink there,
+# and a stale .venv/lib64 symlink breaks every run — hence UV_LINK_MODE=copy
+# and the lib64 cleanup guard below.
+preflight:
+	rm -f .venv/lib64 .venv/lib 2>/dev/null || true

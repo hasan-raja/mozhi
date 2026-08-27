@@ -18,9 +18,15 @@ def _seed_transcript(job_id: str) -> None:
     ]), encoding="utf-8")
 
 
-def test_mock_translate_writes_translated_json(tmp_path: Path, monkeypatch) -> None:
+def test_mock_translate_writes_translated_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Unit test: force mock engine so no network/key is needed."""
     job_id = uuid.uuid4().hex
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("MOZHI_ENGINE_MODE", "mock")
+    from app.config import get_settings
+    get_settings.cache_clear()
     _seed_transcript(job_id)
 
     result = run_translate(job_id)

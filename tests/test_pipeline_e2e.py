@@ -62,11 +62,11 @@ def _run_extract_and_vad(source: Path) -> dict:
 
     from app.tasks import run_extract, run_vad
 
-    r1 = run_extract.__wrapped__(None, JOB)  # type: ignore[attr-defined]
+    r1 = run_extract.__wrapped__(JOB)  # bound method: task_self implicit
     assert r1["stage"] == "extract"
     _ = source
     try:
-        return run_vad.__wrapped__(None, JOB)  # type: ignore[attr-defined]
+        return run_vad.__wrapped__(JOB)  # type: ignore[attr-defined]
     except Exception as exc:
         if "torch" in str(exc):
             seg_file = Path("data") / "jobs" / JOB / "segments.json"
@@ -99,6 +99,12 @@ def test_asr_with_mock_engine_writes_transcript(
 ) -> None:
     """ASR stage persists a transcript.json given upstream artifacts."""
     monkeypatch.chdir(tmp_path)
+    # Force mock engine: the test's audio.wav is fake bytes that real
+    # faster-whisper would reject. Deterministic unit-level coverage.
+    monkeypatch.setenv("MOZHI_ENGINE_MODE", "mock")
+    from app.config import get_settings
+    get_settings.cache_clear()
+
     job_dir = tmp_path / "data" / "jobs" / JOB
     (job_dir / "extract").mkdir(parents=True)
 
@@ -109,7 +115,7 @@ def test_asr_with_mock_engine_writes_transcript(
 
     from app.tasks import run_asr
 
-    result = run_asr.__wrapped__(None, JOB)  # type: ignore[attr-defined]
+    result = run_asr.__wrapped__(JOB)  # type: ignore[attr-defined]
 
     transcript = job_dir / "transcript.json"
     assert transcript.exists()

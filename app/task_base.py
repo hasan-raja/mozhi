@@ -59,6 +59,8 @@ def stage_task(stage: str) -> Callable[[Callable[..., Any]], Any]:
             _chain_next(stage, job_id)
             return result
 
+        return inner
+
     return decorator
 
 
