@@ -101,16 +101,24 @@ def get_engines() -> dict[str, object]:
 
         engines: dict[str, object] = get_local_engines()
         # Free-first fallback ladder for translation: IndicTrans2 (heavy local
-        # model) → OpenRouter LLM (light, free tier). If the local translator
-        # isn't usable, swap in OpenRouter transparently.
+        # model) → Groq LLM (light, free tier) → OpenRouter LLM (light, free tier).
+        # If the local translator isn't usable, swap in Groq transparently.
         tr = engines.get("translate")
         if tr is not None and getattr(tr, "usable", True) is False:
-            from app.engines.openrouter import OpenRouterTranslationEngine
+            from app.engines.groq import GroqTranslationEngine
 
-            engines["translate"] = OpenRouterTranslationEngine()
+            engines["translate"] = GroqTranslationEngine()
         return engines
+    if mode == "groq":
+        # Explicit Groq mode — uses Groq for translation, local for ASR/TTS
+        from app.engines.groq import GroqTranslationEngine
+        from app.engines.local import get_local_engines
+
+        groq_engines: dict[str, object] = get_local_engines()
+        groq_engines["translate"] = GroqTranslationEngine()
+        return groq_engines
     if mode == "sarvam":
         from app.engines.sarvam_engine import get_sarvam_engines
 
         return get_sarvam_engines()
-    raise ValueError(f"unknown MOZHI_ENGINE_MODE: {mode!r} (use local|sarvam|mock)")
+    raise ValueError(f"unknown MOZHI_ENGINE_MODE: {mode!r} (use local|groq|sarvam|mock)")

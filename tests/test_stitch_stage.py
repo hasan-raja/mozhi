@@ -6,7 +6,6 @@ from unittest.mock import patch
 
 import pytest
 
-from app.media import FFmpegError
 from app.stages.stitch_stage import run_stitch
 
 
@@ -41,14 +40,19 @@ def test_stitch_success(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
     _seed_job(tmp_path, job_id, segments=3)
 
-    # Mock ffmpeg calls so we don't spawn real subprocesses
-    with patch("app.media.ffmpeg_concat_wavs") as mock_concat, \
-         patch("app.media.ffmpeg_mux_audio_on_video") as mock_mux:
-        # Simulate ffmpeg writing the output file
+    # Mock ffmpeg calls where they're USED (in stitch_stage)
+    with patch("app.stages.stitch_stage.ffmpeg_concat_wavs") as mock_concat, \
+         patch("app.stages.stitch_stage.ffmpeg_mux_audio_on_video") as mock_mux:
+        # Simulate ffmpeg writing the output files
+        def fake_concat(wav_files, output):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"concatenated wav")
+
         def fake_mux(video, audio, output):
             Path(output).parent.mkdir(parents=True, exist_ok=True)
             Path(output).write_bytes(b"final mp4 content")
 
+        mock_concat.side_effect = fake_concat
         mock_mux.side_effect = fake_mux
 
         result = run_stitch(job_id)
