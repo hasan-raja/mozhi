@@ -21,8 +21,10 @@ def _get_whisper() -> Any:
     if _whisper_model is None:
         from faster_whisper import WhisperModel
 
-        # base model: ~150MB download on first use; CPU-friendly
-        _whisper_model = WhisperModel("base", device="cpu", compute_type="int8")
+        # "small" (~700MB) — base hallucinates badly on music/song content
+        # (endless token repetition); small is far more stable for Tamil
+        # dubbed-source audio while still CPU-viable on 8GB RAM.
+        _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
     return _whisper_model
 
 
@@ -45,10 +47,19 @@ class LocalTranscriptionEngine:
         model = _get_whisper()
         # source_lang may be None → faster-whisper AUTO-DETECTS the language
         # from the audio (preferred when the caller doesn't know it).
+        #
+        # Anti-hallucination tuning: small/whisper models loop on repetitive
+        # tokens ("ஐயா ஐயா...") when speech is song/music. These thresholds
+        # reject low-confidence / over-repetitive output and stop echo loops.
         segments_iter, info = model.transcribe(
             audio_path,
             vad_filter=True,
             language=source_lang,
+            temperature=0.0,
+            compression_ratio_threshold=2.4,
+            log_prob_threshold=-1.0,
+            no_speech_threshold=0.6,
+            condition_on_previous_text=False,
         )
         out: list[TranscriptSegment] = []
         for i, seg in enumerate(segments_iter):
