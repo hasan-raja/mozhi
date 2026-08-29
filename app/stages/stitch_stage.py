@@ -33,9 +33,8 @@ def run_stitch(job_id: str) -> dict[str, Any]:
     job_dir = _job_dir(job_id)
 
     final_path = job_dir / "final.mp4"
-    if final_path.exists() and final_path.stat().st_size > 0:
-        logger.info("stitch job=%s final.mp4 already exists — skipping", job_id)
-        return {"job_id": job_id, "stage": "stitch", "output": str(final_path)}
+    if final_path.exists():
+        logger.info("stitch job=%s final.mp4 already exists — regenerating", job_id)
 
     # Source video for the video track
     from app.tasks import _find_source
