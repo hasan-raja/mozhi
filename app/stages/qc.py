@@ -88,8 +88,11 @@ def _load_original_bounds(job_dir: Path) -> dict[int, dict[str, int]]:
 def _snr_db(wav_path: Path) -> float:
     """Return signal-to-noise ratio in dB using librosa.
 
-    SNR = 10 * log10( sum(signal^2) / sum(noise^2) )
-    Noise is estimated as the residual after subtracting the mean.
+    SNR = 10 * log10( mean_frame_energy / noise_floor )
+    The noise floor is estimated from the quietest 10% of frames (true
+    silence/background), NOT by subtracting the mean (which is ~0 for speech
+    and collapses every segment to SNR=0.0 — a bug that false-failed all
+    clean TTS output).
     """
     try:
         import librosa
@@ -101,14 +104,17 @@ def _snr_db(wav_path: Path) -> float:
     y, _sr = librosa.load(str(wav_path), sr=16000, mono=True)
     if len(y) == 0:
         return float("-inf")
-    # Signal power (mean-squared amplitude)
-    signal_power = np.mean(y ** 2)
-    # Noise: residual from mean subtraction approximates noise floor
-    noise = y - np.mean(y)
-    noise_power = np.mean(noise ** 2)
-    if noise_power <= 0:
+    rms = librosa.feature.rms(y=y, frame_length=512, hop_length=128)[0]
+    if len(rms) == 0:
+        return float("-inf")
+    # Noise floor = mean energy of the quietest 10% of frames
+    sorted_rms = np.sort(rms)
+    n_floor = max(1, len(sorted_rms) // 10)
+    noise_floor = float(np.mean(sorted_rms[:n_floor]) ** 2)
+    signal_power = float(np.mean(rms ** 2))
+    if noise_floor <= 0:
         return float("inf")
-    return float(10.0 * np.log10(signal_power / noise_power))
+    return float(10.0 * np.log10(signal_power / noise_floor))
 
 
 # ── ffmpeg loudnorm normalization ────────────────────────────────────────────
