@@ -40,9 +40,11 @@ class LocalTranscriptionEngine:
         )
 
     def _transcribe_sync(
-        self, audio_path: str, source_lang: str
+        self, audio_path: str, source_lang: str | None
     ) -> list[TranscriptSegment]:
         model = _get_whisper()
+        # source_lang may be None → faster-whisper AUTO-DETECTS the language
+        # from the audio (preferred when the caller doesn't know it).
         segments_iter, info = model.transcribe(
             audio_path,
             vad_filter=True,

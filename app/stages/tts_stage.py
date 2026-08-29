@@ -47,17 +47,24 @@ async def _synthesize_edge(text: str, voice: str, out_path: Path) -> float:
     produces an empty or corrupt file — fail fast instead of shipping
     broken audio that only surfaces at the stitch stage.
     """
+    import asyncio
+    import os
+
     import edge_tts
 
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(str(out_path))
 
-    import os
+    loop = asyncio.get_running_loop()
 
-    if not os.path.exists(out_path) or os.stat(out_path).st_size == 0:
-        raise FFmpegError(
-            f"edge-tts produced empty file for voice={voice!r}: {out_path}"
-        )
+    def _validate() -> None:
+        if not os.path.exists(out_path) or os.stat(out_path).st_size == 0:
+            raise FFmpegError(
+                f"edge-tts produced empty file for voice={voice!r}: {out_path}"
+            )
+
+    await loop.run_in_executor(None, _validate)
+
     duration = await _probe_duration(out_path)
     if duration <= 0:
         raise FFmpegError(

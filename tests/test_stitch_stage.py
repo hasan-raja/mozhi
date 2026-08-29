@@ -65,23 +65,38 @@ def test_stitch_success(tmp_path: Path, monkeypatch) -> None:
     mock_mux.assert_called_once()
 
 
-def test_stitch_skips_when_already_exists(tmp_path: Path, monkeypatch) -> None:
-    """Idempotent: existing final.mp4 means we return without calling ffmpeg."""
+def test_stitch_regenerates_when_already_exists(tmp_path: Path, monkeypatch) -> None:
+    """Stale final.mp4 is regenerated, not reused — a stale mux with wrong
+    audio must never be returned. Existing output triggers a fresh concat+mux.
+    """
     job_id = "testjob_stitch_002"
     monkeypatch.chdir(tmp_path)
     _seed_job(tmp_path, job_id)
 
     final_path = tmp_path / "data" / "jobs" / job_id / "final.mp4"
-    final_path.write_bytes(b"existing")
+    final_path.write_bytes(b"stale")
 
-    with patch("app.media.ffmpeg_concat_wavs") as mock_concat, \
-         patch("app.media.ffmpeg_mux_audio_on_video") as mock_mux:
+    with patch("app.stages.stitch_stage.ffmpeg_concat_wavs") as mock_concat, \
+         patch("app.stages.stitch_stage.ffmpeg_mux_audio_on_video") as mock_mux:
+        def fake_concat(wav_files, output):
+            output.parent.mkdir(parents=True, exist_ok=True)
+            output.write_bytes(b"concatenated wav")
+
+        def fake_mux(video, audio, output):
+            Path(output).parent.mkdir(parents=True, exist_ok=True)
+            Path(output).write_bytes(b"regenerated final")
+
+        mock_concat.side_effect = fake_concat
+        mock_mux.side_effect = fake_mux
         result = run_stitch(job_id)
 
     assert result["stage"] == "stitch"
     assert "final.mp4" in result["output"]
-    mock_concat.assert_not_called()
-    mock_mux.assert_not_called()
+    # Regeneration must run ffmpeg again (not skip).
+    mock_concat.assert_called_once()
+    mock_mux.assert_called_once()
+    # The stale bytes were overwritten by the mux step.
+    assert final_path.read_bytes() != b"stale"
 
 
 def test_stitch_no_tts_files_raises(tmp_path: Path, monkeypatch) -> None:
