@@ -9,10 +9,12 @@ pad/truncate to guarantee 1:1 mapping with the source segments.
 """
 
 import logging
-import os
+import re
 from typing import Any
 
 import httpx
+
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +46,8 @@ class OpenRouterTranslationEngine:
     """LLM translation via OpenRouter (Gemini Flash free tier)."""
 
     def __init__(self, api_key: str | None = None, model: str = MODEL) -> None:
-        self.api_key = api_key or os.environ.get("OPENROUTER_API_KEY", "")
+        settings = get_settings()
+        self.api_key = settings.openrouter_api_key if api_key is None else api_key
         self.model = model
 
     async def translate(self, texts: list[str], target_lang: str) -> list[str]:
@@ -89,22 +92,12 @@ class OpenRouterTranslationEngine:
             line = line.strip()
             if not line:
                 continue
-            for sep in (". ", ") ", ".)", "- "):
-                if sep in line[:6]:
-                    num_part, _, text = line.partition(sep)
-                    if num_part.strip().isdigit():
-                        out[int(num_part)] = text.strip()
-                    break
+            match = re.match(r"^(\d+)(?:[.)-])\s+(.+)$", line)
+            if match:
+                index = int(match.group(1))
+                if 1 <= index <= expected:
+                    out[index] = match.group(2).strip()
         result = [out.get(i + 1, "") for i in range(expected)]
-        # fill any gaps from unparsed trailing content
-        if any(not r for r in result):
-            fallback = [
-                ln.strip() for ln in raw.splitlines()
-                if ln.strip() and not ln[:3].rstrip(". ").isdigit()
-            ]
-            for i, v in enumerate(result):
-                if not v and fallback:
-                    result[i] = fallback.pop(0)
         return result
 
 

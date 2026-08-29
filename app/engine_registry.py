@@ -12,6 +12,8 @@ Swap tier = one env var. Nothing else changes.
 from dataclasses import dataclass
 from typing import Protocol
 
+import httpx
+
 from app.config import get_settings
 
 
@@ -44,6 +46,20 @@ class TranscriptionEngine(Protocol):
 
 class TranslationEngine(Protocol):
     async def translate(self, texts: list[str], target_lang: str) -> list[str]: ...
+
+
+class TranslationFallbackEngine:
+    """Try the primary translator, then the fallback on provider failures."""
+
+    def __init__(self, primary: TranslationEngine, fallback: TranslationEngine) -> None:
+        self.primary = primary
+        self.fallback = fallback
+
+    async def translate(self, texts: list[str], target_lang: str) -> list[str]:
+        try:
+            return await self.primary.translate(texts, target_lang)
+        except (httpx.HTTPError, RuntimeError):
+            return await self.fallback.translate(texts, target_lang)
 
 
 class SpeechEngine(Protocol):
@@ -89,7 +105,8 @@ def get_engines() -> dict[str, object]:
 
     Local/Sarvam engines import lazily — CI must not need torch/ffmpeg installed.
     """
-    mode = get_settings().engine_mode
+    settings = get_settings()
+    mode = settings.engine_mode
     if mode == "mock":
         return {
             "asr": MockTranscriptionEngine(),
@@ -100,14 +117,20 @@ def get_engines() -> dict[str, object]:
         from app.engines.local import get_local_engines
 
         engines: dict[str, object] = get_local_engines()
-        # Free-first fallback ladder for translation: IndicTrans2 (heavy local
-        # model) → Groq LLM (light, free tier) → OpenRouter LLM (light, free tier).
-        # If the local translator isn't usable, swap in Groq transparently.
+        # Free-first fallback ladder: IndicTrans2 → Groq → OpenRouter.
         tr = engines.get("translate")
         if tr is not None and getattr(tr, "usable", True) is False:
             from app.engines.groq import GroqTranslationEngine
+            from app.engines.openrouter import OpenRouterTranslationEngine
 
-            engines["translate"] = GroqTranslationEngine()
+            if settings.groq_api_key and settings.openrouter_api_key:
+                engines["translate"] = TranslationFallbackEngine(
+                    GroqTranslationEngine(), OpenRouterTranslationEngine()
+                )
+            elif settings.openrouter_api_key:
+                engines["translate"] = OpenRouterTranslationEngine()
+            else:
+                engines["translate"] = GroqTranslationEngine()
         return engines
     if mode == "groq":
         # Explicit Groq mode — uses Groq for translation, local for ASR/TTS

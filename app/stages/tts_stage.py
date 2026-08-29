@@ -14,6 +14,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from app.media import FFmpegError
 from app.task_base import PermanentStageError
 
 logger = logging.getLogger(__name__)
@@ -40,12 +41,29 @@ def _edge_tts_voice(target_lang: str) -> str:
 
 
 async def _synthesize_edge(text: str, voice: str, out_path: Path) -> float:
-    """Edge TTS: free neural voices. Returns duration in seconds."""
+    """Edge TTS: free neural voices. Returns duration in seconds.
+
+    Raises FFmpegError (a RETRYABLE exception for the pipeline) when edge-tts
+    produces an empty or corrupt file — fail fast instead of shipping
+    broken audio that only surfaces at the stitch stage.
+    """
     import edge_tts
 
     communicate = edge_tts.Communicate(text, voice)
     await communicate.save(str(out_path))
-    return await _probe_duration(out_path)
+
+    import os
+
+    if not os.path.exists(out_path) or os.stat(out_path).st_size == 0:
+        raise FFmpegError(
+            f"edge-tts produced empty file for voice={voice!r}: {out_path}"
+        )
+    duration = await _probe_duration(out_path)
+    if duration <= 0:
+        raise FFmpegError(
+            f"edge-tts output has zero duration for voice={voice!r}: {out_path}"
+        )
+    return duration
 
 
 async def _probe_duration(out_path: Path) -> float:

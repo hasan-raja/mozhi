@@ -63,7 +63,9 @@ def ffmpeg_mux_audio_on_video(
     args = [
         "-i", video_path,
         "-i", audio_path,
-        "-c:v", "copy",               # keep original video stream
+        "-map", "0:v:0",              # video stream from the source video
+        "-map", "1:a:0",              # audio stream from the supplied dubbed audio
+        "-c:v", "copy",               # keep original video stream (no re-encode)
         "-c:a", "aac",                # re-encode audio to AAC (universally compatible)
         "-b:a", "128k",
         "-shortest",

@@ -90,6 +90,21 @@ class TestGroqTranslationEngine:
 
         assert result == ["Only one line", "", ""]
 
+    def test_parser_keeps_missing_numbered_lines_empty(self):
+        """Never shift dialogue into a neighbouring source segment."""
+        raw = "1) First line\n3- Third line"
+
+        assert GroqTranslationEngine._parse_numbered_lines(raw, 3) == [
+            "First line",
+            "",
+            "Third line",
+        ]
+
+    def test_parser_ignores_unnumbered_content_when_indices_are_missing(self):
+        raw = "1) First line\nUnnumbered commentary"
+
+        assert GroqTranslationEngine._parse_numbered_lines(raw, 2) == ["First line", ""]
+
     @pytest.mark.asyncio
     async def test_translate_handles_http_error(self, engine):
         mock_resp = MagicMock()

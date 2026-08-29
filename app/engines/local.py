@@ -35,11 +35,19 @@ class LocalTranscriptionEngine:
         import asyncio
 
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self._transcribe_sync, audio_path)
+        return await loop.run_in_executor(
+            None, self._transcribe_sync, audio_path, source_lang
+        )
 
-    def _transcribe_sync(self, audio_path: str) -> list[TranscriptSegment]:
+    def _transcribe_sync(
+        self, audio_path: str, source_lang: str
+    ) -> list[TranscriptSegment]:
         model = _get_whisper()
-        segments_iter, info = model.transcribe(audio_path, vad_filter=True)
+        segments_iter, info = model.transcribe(
+            audio_path,
+            vad_filter=True,
+            language=source_lang,
+        )
         out: list[TranscriptSegment] = []
         for i, seg in enumerate(segments_iter):
             out.append(
@@ -51,7 +59,10 @@ class LocalTranscriptionEngine:
                     language=info.language,
                 )
             )
-        logger.info("local ASR: %d segments from %s", len(out), audio_path)
+        logger.info(
+            "local ASR: %d segments from %s (detected=%s)",
+            len(out), audio_path, info.language,
+        )
         return out
 
 

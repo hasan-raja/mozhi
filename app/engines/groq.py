@@ -10,6 +10,7 @@ pad/truncate to guarantee 1:1 mapping with the source segments.
 """
 
 import logging
+import re
 from typing import Any
 
 import httpx
@@ -92,22 +93,12 @@ class GroqTranslationEngine:
             line = line.strip()
             if not line:
                 continue
-            for sep in (". ", ") ", ".)", "- "):
-                if sep in line[:6]:
-                    num_part, _, text = line.partition(sep)
-                    if num_part.strip().isdigit():
-                        out[int(num_part)] = text.strip()
-                    break
+            match = re.match(r"^(\d+)(?:[.)-])\s+(.+)$", line)
+            if match:
+                index = int(match.group(1))
+                if 1 <= index <= expected:
+                    out[index] = match.group(2).strip()
         result = [out.get(i + 1, "") for i in range(expected)]
-        # fill any gaps from unparsed trailing content
-        if any(not r for r in result):
-            fallback = [
-                ln.strip() for ln in raw.splitlines()
-                if ln.strip() and not ln[:3].rstrip(". ").isdigit()
-            ]
-            for i, v in enumerate(result):
-                if not v and fallback:
-                    result[i] = fallback.pop(0)
         return result
 
 
