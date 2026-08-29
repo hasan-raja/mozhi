@@ -26,6 +26,35 @@ def _job_dir(job_id: str) -> Path:
     return DATA_ROOT / "jobs" / job_id
 
 
+def _load_target_lang(job_id: str) -> str:
+    """Read the job's target language from the DB (falls back to 'ta')."""
+    try:
+        import asyncio
+        import uuid
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from app.config import get_settings
+        from app.repos import JobRepo
+
+        async def _load() -> str:
+            engine = create_async_engine(get_settings().database_url)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            try:
+                async with maker() as session:
+                    job = await JobRepo(session).get(uuid.UUID(job_id))
+                    return job.target_lang if job and job.target_lang else "ta"
+            finally:
+                await engine.dispose()
+
+        return str(asyncio.run(_load()))
+    except Exception:
+        logger.exception(
+            "tts job=%s: failed to load target_lang, defaulting to ta", job_id
+        )
+        return "ta"
+
+
 def _edge_tts_voice(target_lang: str) -> str:
     """Map our language codes to free Edge neural voices."""
     voices = {
@@ -106,9 +135,10 @@ def run_tts(job_id: str) -> dict[str, Any]:
     segments: list[dict[str, Any]] = json.loads(
         translated_path.read_text(encoding="utf-8")
     )
-    target_lang = "ta"
-    if segments and "-" in str(segments[0].get("translated_text", "")):
-        pass  # language comes from job row; default ta
+    # Target language comes from the JOB ROW, not a hardcoded default — a Hindi
+    # job must synthesize Hindi audio, not Tamil. Falls back to 'ta' only if
+    # the DB row is unreachable (local/manual runs).
+    target_lang = _load_target_lang(job_id)
 
     mode = get_settings().engine_mode
     out_dir = job_dir / "tts"

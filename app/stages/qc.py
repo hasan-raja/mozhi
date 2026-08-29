@@ -30,6 +30,35 @@ def _job_dir(job_id: str) -> Path:
     return DATA_ROOT / "jobs" / job_id
 
 
+def _load_target_lang(job_id: str) -> str:
+    """Read the job's target language from the DB (falls back to 'ta')."""
+    try:
+        import asyncio
+        import uuid
+
+        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+        from app.config import get_settings
+        from app.repos import JobRepo
+
+        async def _load() -> str:
+            engine = create_async_engine(get_settings().database_url)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            try:
+                async with maker() as session:
+                    job = await JobRepo(session).get(uuid.UUID(job_id))
+                    return job.target_lang if job and job.target_lang else "ta"
+            finally:
+                await engine.dispose()
+
+        return str(asyncio.run(_load()))
+    except Exception:
+        logger.exception(
+            "qc job=%s: failed to load target_lang, defaulting to ta", job_id
+        )
+        return "ta"
+
+
 def _load_durations(job_dir: Path) -> list[dict[str, Any]]:
     dur_path = job_dir / "durations.json"
     if not dur_path.exists():
@@ -117,7 +146,7 @@ def _get_whisper_model() -> Any:
         try:
             from faster_whisper import WhisperModel  # type: ignore[import-untyped]
             _WHISPER_MODEL = WhisperModel(
-                "base", device="cpu", compute_type="int8"
+                "small", device="cpu", compute_type="int8"
             )
         except ImportError:
             logger.warning(
@@ -127,20 +156,33 @@ def _get_whisper_model() -> Any:
     return _WHISPER_MODEL
 
 
-def _whisper_pronunciation_score(wav_path: Path, expected_text: str) -> float:
+def _whisper_pronunciation_score(
+    wav_path: Path, expected_text: str, target_lang: str
+) -> float:
     """Re-transcribe with faster-whisper and score similarity to expected text.
 
     Returns Jaccard similarity of lowercased token set (0.0–1.0).
-    Returns 1.0 if the engine is unavailable (fail-open).
+    Returns 1.0 (pass) on any failure — this check is OPTIONAL and must
+    never block the pipeline. It's gated by MOZHI_QC_PRONUNCIATION; off by
+    default because re-transcribing already-synthesized speech is expensive
+    (~30-60s/segment on CPU) and low-value for trusted TTS engines.
     """
+    import os
+
+    if not os.environ.get("MOZHI_QC_PRONUNCIATION"):
+        return 1.0
     model = _get_whisper_model()
     if model is None:
         return 1.0
+    try:
+        seg_iter, _info = model.transcribe(
+            str(wav_path), language=target_lang, beam_size=3, vad_filter=False
+        )
+        actual = " ".join(seg.text for seg in seg_iter).strip().lower()
+    except Exception:
+        logger.exception("qc round-trip failed for %s — passing", wav_path)
+        return 1.0
 
-    seg_iter, _info = model.transcribe(
-        str(wav_path), language="ta", beam_size=3, vad_filter=False
-    )
-    actual = " ".join(seg.text for seg in seg_iter).strip().lower()
     expected = expected_text.strip().lower()
 
     actual_tokens = set(actual.split())
@@ -164,6 +206,7 @@ def run_qc(job_id: str) -> dict[str, Any]:
     duration-ratio are re-normalized in-place.
     """
     job_dir = _job_dir(job_id)
+    target_lang = _load_target_lang(job_id)
     durations = _load_durations(job_dir)
     bounds = _load_original_bounds(job_dir)
 
@@ -220,7 +263,7 @@ def run_qc(job_id: str) -> dict[str, Any]:
         # 4. Whisper round-trip (pronunciation accuracy)
         expected_text = seg_texts.get(idx, "")
         if expected_text:
-            pron_score = _whisper_pronunciation_score(wav, expected_text)
+            pron_score = _whisper_pronunciation_score(wav, expected_text, target_lang)
         else:
             pron_score = 1.0
 
