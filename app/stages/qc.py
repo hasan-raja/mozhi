@@ -25,9 +25,67 @@ DATA_ROOT = Path("data")
 SNR_FLOOR_DB = 12.0
 DURATION_TOLERANCE = 0.15  # ±15% drift allowed
 
+# Step 18: QC feedback loop — auto-remediation before human review.
+QC_MAX_RETRIES = 2          # re-synth attempts per segment before escalation
+TTS_RATE_DEFAULT = "+0%"   # edge-tts rate; negative = slower speech
+TTS_RATE_SLOW = "-20%"    # slower re-synth to better fill the original window
+
 
 def _job_dir(job_id: str) -> Path:
     return DATA_ROOT / "jobs" / job_id
+
+
+def _resynth_segment_slower(
+    job_id: str, idx: int, text: str, target_lang: str, out_path: Path
+) -> float:
+    """Re-synthesize ONE segment at a slower rate (Step 18 remediation).
+
+    Returns the new duration in seconds, or 0.0 on failure. Reuses edge-tts via
+    the tts stage's helpers so the voice/rate logic stays in one place.
+    """
+    try:
+        from app.stages.tts_stage import (
+            _edge_tts_voice,
+            asyncio_run_helper,
+        )
+
+        voice = _edge_tts_voice(target_lang)
+        # edge-tts Communicate accepts a rate override; _synthesize_edge uses the
+        # default — patch via monkeypatch-free wrapper is overkill, so we call a
+        # small inline path here mirroring _synthesize_edge but with rate.
+        import asyncio
+
+        import edge_tts
+
+        communicate = edge_tts.Communicate(text, voice, rate=TTS_RATE_SLOW)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(communicate.save(str(out_path)))
+        finally:
+            loop.close()
+
+        duration = asyncio_run_helper(_probe_duration_safe(out_path))
+        if duration <= 0:
+            return 0.0
+        return duration
+    except Exception:
+        logger.exception("qc remediation: re-synth seg=%d failed", idx)
+        return 0.0
+
+
+def _probe_duration_safe(out_path: Path) -> float:
+    """ffprobe duration; mirror of tts_stage helper but import-safe here."""
+    try:
+        import subprocess
+
+        proc = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(out_path)],
+            capture_output=True, text=True,
+        )
+        return float(proc.stdout.strip())
+    except (ValueError, FileNotFoundError):
+        return 0.0
 
 
 def _load_target_lang(job_id: str) -> str:
@@ -226,20 +284,24 @@ def run_qc(job_id: str) -> dict[str, Any]:
                 idx = s.get("index", 0)
                 seg_texts[idx] = s.get("translated_text", "")
 
-    tts_dir = job_dir / "tts"
     scores: list[dict[str, Any]] = []
     renormalized = 0
+    escalated = 0
 
     for entry in durations:
         idx = entry["index"]
         wav = Path(entry["audio_path"])
+        retries = 0
         if not wav.exists() or wav.stat().st_size == 0:
             logger.warning("qc job=%s seg=%d missing/empty wav — flagging", job_id, idx)
             scores.append({
                 "index": idx,
                 "passed": False,
                 "reason": "missing_or_empty_wav",
+                "retries": 0,
+                "escalate": True,
             })
+            escalated += 1
             continue
 
         # 1. SNR check
@@ -255,16 +317,58 @@ def run_qc(job_id: str) -> dict[str, Any]:
         duration_drift = abs(ratio - 1.0)
         duration_ok = duration_drift <= DURATION_TOLERANCE
 
-        # 3. Loudness normalization if SNR floor breached
-        passed = snr >= SNR_FLOOR_DB and duration_ok
+        reason = ""
         if snr < SNR_FLOOR_DB:
-            norm_path = tts_dir / f"seg_{idx}_norm.wav"
-            if _normalize_loudness(wav, norm_path):
-                wav.unlink(missing_ok=True)
-                norm_path.rename(wav)
-                renormalized += 1
-                snr = _snr_db(wav)
-                entry["audio_path"] = str(wav)
+            reason = "snr_low"
+        elif not duration_ok:
+            reason = "duration_drift"
+
+        # Step 18 remediation loop: retry with adjusted params before escalation
+        while reason and retries < QC_MAX_RETRIES:
+            if reason == "snr_low":
+                # Loudness normalization (idempotent — safe to retry)
+                # Build norm_path beside wav so both share absolute/relative
+                # form (avoids Windows os.replace path-mismatch errors).
+                norm_path = wav.parent / f"seg_{idx}_norm.wav"
+                if _normalize_loudness(wav, norm_path):
+                    import os
+
+                    # os.replace overwrites atomically on all platforms
+                    # (plain rename fails on Windows when dest exists).
+                    os.replace(str(norm_path), str(wav))
+                    renormalized += 1
+                    snr = _snr_db(wav)
+                    entry["audio_path"] = str(wav)
+            elif reason == "duration_drift":
+                # Re-synthesize slower so speech fills the original window better
+                text = seg_texts.get(idx, "")
+                if text:
+                    new_dur = _resynth_segment_slower(
+                        job_id, idx, text, target_lang, wav
+                    )
+                    if new_dur > 0:
+                        tts_ms = int(new_dur * 1000)
+                        entry["duration_ms"] = tts_ms
+                        if orig_ms > 0:
+                            ratio = tts_ms / orig_ms
+                            duration_drift = abs(ratio - 1.0)
+
+            retries += 1
+            # Re-evaluate pass condition
+            snr_ok = snr >= SNR_FLOOR_DB
+            duration_ok = duration_drift <= DURATION_TOLERANCE
+            if snr_ok and duration_ok:
+                reason = ""
+                break
+            # Pick the still-failing reason for the next retry
+            if not snr_ok:
+                reason = "snr_low"
+            elif not duration_ok:
+                reason = "duration_drift"
+
+        passed = (not reason)
+        if not passed:
+            escalated += 1
 
         # 4. Whisper round-trip (pronunciation accuracy)
         expected_text = seg_texts.get(idx, "")
@@ -280,7 +384,9 @@ def run_qc(job_id: str) -> dict[str, Any]:
             "snr_db": round(snr, 2),
             "duration_ratio": round(ratio, 3),
             "pronunciation_score": round(pron_score, 3),
-            "reason": "" if seg_passed else "snr_low" if snr < SNR_FLOOR_DB else "duration_drift",
+            "retries": retries,
+            "escalate": (not seg_passed),
+            "reason": "" if seg_passed else reason,
         })
 
     # Persist QC scores back into durations.json
@@ -310,4 +416,5 @@ def run_qc(job_id: str) -> dict[str, Any]:
         "passed": len(scores) - len(failed),
         "failed": len(failed),
         "renormalized": renormalized,
+        "escalated": escalated,
     }
