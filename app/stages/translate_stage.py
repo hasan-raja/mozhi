@@ -53,18 +53,31 @@ def run_translate(job_id: str) -> dict[str, Any]:
     from app.repos import JobRepo  # local import avoids cycle at module load
 
     async def _load_target() -> str:
-        from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+        """Load job.target_lang from the DB.
 
-        from app.config import get_settings
-
-        engine = create_async_engine(get_settings().database_url)
-        maker = async_sessionmaker(engine, expire_on_commit=False)
+        Falls back to 'ta' when the DB row is unreachable (local/manual/CI
+        runs without Postgres) so the stage degrades gracefully instead of
+        crashing the whole pipeline.
+        """
         try:
-            async with maker() as session:
-                job = await JobRepo(session).get(__import__("uuid").UUID(job_id))
-                return job.target_lang if job else "ta"
-        finally:
-            await engine.dispose()
+            from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+            from app.config import get_settings
+
+            engine = create_async_engine(get_settings().database_url)
+            maker = async_sessionmaker(engine, expire_on_commit=False)
+            try:
+                async with maker() as session:
+                    job = await JobRepo(session).get(__import__("uuid").UUID(job_id))
+                    return job.target_lang if job else "ta"
+            finally:
+                await engine.dispose()
+        except Exception:
+            logger.warning(
+                "translate job=%s: DB target_lang lookup failed, defaulting to ta",
+                job_id,
+            )
+            return "ta"
 
     target_lang = run_async(_load_target())
 
