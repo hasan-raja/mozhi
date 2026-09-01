@@ -104,7 +104,9 @@ def simple_diarize(
     return merged
 
 
-def classify_gender_from_pitch(audio_path: str | Path, segments: list[SegmentDict]) -> list[SegmentDict]:
+def classify_gender_from_pitch(
+    audio_path: str | Path, segments: list[SegmentDict]
+) -> list[SegmentDict]:
     """Heuristic gender classification per segment using pitch (f0).
 
     Args:
