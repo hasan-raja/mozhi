@@ -55,9 +55,18 @@ def _load_target_lang(job_id: str) -> str:
         return "ta"
 
 
-def _edge_tts_voice(target_lang: str) -> str:
-    """Map our language codes to free Edge neural voices."""
-    voices = {
+def _edge_tts_voice(target_lang: str, gender: str | None = None) -> str:
+    """Map our language codes to free Edge neural voices.
+
+    Args:
+        target_lang: Language code (ta, hi, en, te, kn, ml, bn)
+        gender: "male", "female", or None (defaults to female for backwards compat)
+
+    Returns:
+        Edge TTS voice identifier.
+    """
+    # Female voices (default, original mapping)
+    female_voices = {
         "ta": "ta-IN-PallaviNeural",
         "hi": "hi-IN-SwaraNeural",
         "en": "en-IN-NeerjaNeural",
@@ -66,7 +75,23 @@ def _edge_tts_voice(target_lang: str) -> str:
         "ml": "ml-IN-SobhanaNeural",
         "bn": "bn-IN-TanishaaNeural",
     }
-    return voices.get(target_lang, voices["en"])
+
+    # Male voices for gender-aware dubbing
+    male_voices = {
+        "ta": "ta-IN-ValluvarNeural",
+        "hi": "hi-IN-MadhurNeural",
+        "en": "en-IN-PrabhatNeural",
+        "te": "te-IN-MohanNeural",
+        "kn": "kn-IN-GaganNeural",
+        "ml": "ml-IN-MidhunNeural",
+        "bn": "bn-IN-BashkarNeural",
+    }
+
+    if gender == "male" and target_lang in male_voices:
+        return male_voices[target_lang]
+
+    # Default to female for backwards compatibility
+    return female_voices.get(target_lang, female_voices["en"])
 
 
 async def _synthesize_edge(text: str, voice: str, out_path: Path, rate: str = "+0%") -> float:
@@ -248,6 +273,21 @@ def run_tts(job_id: str) -> dict[str, Any]:
     # the DB row is unreachable (local/manual runs).
     target_lang = _load_target_lang(job_id)
 
+    # Load diarization for gender-aware voice selection
+    diarization_path = job_dir / "diarization.json"
+    diarization_segments: list[dict[str, Any]] = []
+    if diarization_path.exists():
+        try:
+            diarization_segments = json.loads(diarization_path.read_text(encoding="utf-8"))
+        except Exception:
+            logger.warning("tts job=%s: failed to load diarization.json", job_id)
+
+    # Build a lookup: (start_ms, end_ms) -> gender
+    gender_lookup: dict[tuple[int, int], str] = {}
+    for dseg in diarization_segments:
+        key = (dseg.get("start_ms", 0), dseg.get("end_ms", 0))
+        gender_lookup[key] = dseg.get("gender", "unknown")
+
     mode = get_settings().engine_mode
     out_dir = job_dir / "tts"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -257,6 +297,11 @@ def run_tts(job_id: str) -> dict[str, Any]:
         text = seg.get("translated_text", "")
         idx = seg.get("index", 0)
         out_file = out_dir / f"seg_{idx}.wav"
+
+        # Get gender for this segment from diarization (match by timing)
+        start_ms = seg.get("start_ms", 0)
+        end_ms = seg.get("end_ms", 0)
+        gender = gender_lookup.get((start_ms, end_ms), "unknown")
 
         if mode == "mock":
             import wave
@@ -273,7 +318,7 @@ def run_tts(job_id: str) -> dict[str, Any]:
         else:
             # local AND sarvam both use edge-tts for now (free, Indic voices);
             # Sarvem Bulbul swap-in lands when credits are wired (Day 4b).
-            voice = _edge_tts_voice(target_lang)
+            voice = _edge_tts_voice(target_lang, gender)
             original_ms = seg["end_ms"] - seg["start_ms"]
             duration, rate_used = asyncio_run_helper(
                 _synthesize_with_duration_match(text, voice, out_file, original_ms)
@@ -287,6 +332,7 @@ def run_tts(job_id: str) -> dict[str, Any]:
             "original_ms": seg["end_ms"] - seg["start_ms"],
             "tempo_factor": round(tempo_factor, 3),
             "rate_used": rate_used,
+            "gender": gender,
         })
 
     (job_dir / "durations.json").write_text(json.dumps(durations, indent=2))
