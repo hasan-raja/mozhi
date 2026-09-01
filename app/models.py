@@ -124,6 +124,10 @@ class Segment(Base):
     qc_score: Mapped[float | None]
     qc_passed: Mapped[bool | None]
 
+    # Speaker + gender (Day 4 - gender voice mapping)
+    speaker: Mapped[str | None] = mapped_column(String(32))
+    gender: Mapped[str | None] = mapped_column(String(16))  # male|female|unknown
+
     job: Mapped[Job] = relationship(back_populates="segments")
 
     __table_args__ = (

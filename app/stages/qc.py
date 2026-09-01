@@ -40,42 +40,21 @@ def _resynth_segment_slower(
 ) -> float:
     """Re-synthesize ONE segment at a slower rate (Step 18 remediation).
 
-    Returns the new duration in seconds, or 0.0 on failure. Reuses edge-tts via
-    the tts stage's helpers so the voice/rate logic stays in one place.
+    Returns the new duration in seconds, or 0.0 on failure.
     """
+    import asyncio
+
     try:
-        from app.stages.tts_stage import (
-            _edge_tts_voice,
-            asyncio_run_helper,
-        )
+        from app.stages.tts_stage import _edge_tts_voice
 
         voice = _edge_tts_voice(target_lang)
-        # edge-tts Communicate accepts a rate override; _synthesize_edge uses the
-        # default — patch via monkeypatch-free wrapper is overkill, so we call a
-        # small inline path here mirroring _synthesize_edge but with rate.
-        import asyncio
 
         import edge_tts
 
         communicate = edge_tts.Communicate(text, voice, rate=TTS_RATE_SLOW)
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(communicate.save(str(out_path)))
-        finally:
-            loop.close()
+        asyncio.run(communicate.save(str(out_path)))
 
-        duration = asyncio_run_helper(_probe_duration_safe(out_path))
-        if duration <= 0:
-            return 0.0
-        return duration
-    except Exception:
-        logger.exception("qc remediation: re-synth seg=%d failed", idx)
-        return 0.0
-
-
-def _probe_duration_safe(out_path: Path) -> float:
-    """ffprobe duration; mirror of tts_stage helper but import-safe here."""
-    try:
+        # Probe duration locally to avoid asyncio_run_helper tuple return
         import subprocess
 
         proc = subprocess.run(
@@ -83,8 +62,16 @@ def _probe_duration_safe(out_path: Path) -> float:
              "-of", "default=noprint_wrappers=1:nokey=1", str(out_path)],
             capture_output=True, text=True,
         )
-        return float(proc.stdout.strip())
-    except (ValueError, FileNotFoundError):
+        try:
+            duration = float(proc.stdout.strip())
+        except (ValueError, FileNotFoundError):
+            duration = 0.0
+
+        if duration <= 0:
+            return 0.0
+        return duration
+    except Exception:
+        logger.exception("qc remediation: re-synth seg=%d failed", idx)
         return 0.0
 
 

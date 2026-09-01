@@ -42,7 +42,22 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("MOZHI_ENGINE_MODE", "ENGINE_MODE"),
     )  # local | sarvam | groq | mock
 
-    @field_validator("groq_api_key", "openrouter_api_key", "sarvam_api_key", mode="before")
+    # Diarization (Day 4 - gender voice mapping)
+    hf_token: str = Field(
+        default="", validation_alias=AliasChoices("HF_TOKEN", "MOZHI_HF_TOKEN")
+    )
+    enable_diarization: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MOZHI_ENABLE_DIARIZATION", "ENABLE_DIARIZATION"),
+    )
+
+    @field_validator(
+        "groq_api_key",
+        "openrouter_api_key",
+        "sarvam_api_key",
+        "hf_token",
+        mode="before",
+    )
     @classmethod
     def strip_keys(cls, v: str) -> str:
         return v.strip() if isinstance(v, str) else v

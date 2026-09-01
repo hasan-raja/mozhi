@@ -16,6 +16,7 @@ class Stage:
 STAGES: list[Stage] = [
     Stage("extract", "extract"),
     Stage("vad", "vad"),
+    Stage("diarize", "diarize"),
     Stage("asr", "asr"),
     Stage("translate", "translate"),
     Stage("tts", "tts"),

@@ -44,3 +44,5 @@ data/
 models/
 .cache/
 
+.hermes
+

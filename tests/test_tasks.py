@@ -9,7 +9,7 @@ from app.tasks import _next_stage
 
 
 def test_stage_registry_is_ordered_pipeline() -> None:
-    assert STAGE_NAMES == ["extract", "vad", "asr", "translate", "tts", "qc", "stitch"]
+    assert STAGE_NAMES == ["extract", "vad", "diarize", "asr", "translate", "tts", "qc", "stitch"]
 
 
 def test_every_stage_has_unique_queue() -> None:
@@ -28,6 +28,8 @@ def test_celery_routes_tasks_to_stage_queues() -> None:
 
 def test_next_stage_chain() -> None:
     assert _next_stage("extract") == "vad"
+    assert _next_stage("vad") == "diarize"
+    assert _next_stage("diarize") == "asr"
     assert _next_stage("qc") == "stitch"
     assert _next_stage("stitch") is None  # terminal stage
 

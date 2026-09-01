@@ -73,6 +73,57 @@ def run_vad(self: Any, job_id: str) -> dict[str, Any]:
     return {"job_id": job_id, "stage": "vad", "count": len(segments)}
 
 
+@stage_task("diarize")
+def run_diarize(self: Any, job_id: str) -> dict[str, Any]:
+    """Speaker diarization + gender classification on extracted audio.
+
+    Runs simple_diarize (zero-dep energy clustering) by default.
+    When MOZHI_ENABLE_DIARIZATION=true and HF_TOKEN is set, uses pyannote.audio.
+    Output: jobs/{job_id}/diarization.json with speaker + gender per segment.
+    """
+    wav = _job_dir(job_id) / "extract" / "audio.wav"
+    if not wav.exists():
+        raise PermanentStageError(f"extracted audio missing for {job_id}")
+
+    from app.config import get_settings
+    settings = get_settings()
+    use_pyannote = settings.enable_diarization and settings.hf_token
+
+    logger.info("diarize job=%s pyannote=%s", job_id, use_pyannote)
+
+    if use_pyannote:
+        # pyannote pipeline (requires HF_TOKEN + gated models)
+        try:
+            from pyannote.audio import Pipeline  # type: ignore[import-not-found]
+            pipeline = Pipeline.from_pretrained(
+                "pyannote/speaker-diarization-3.1",
+                use_auth_token=settings.hf_token,
+            )
+            diarization = pipeline(str(wav))
+            segments = []
+            for turn, _, speaker in diarization.itertracks(yield_label=True):
+                segments.append({
+                    "start_ms": int(turn.start * 1000),
+                    "end_ms": int(turn.end * 1000),
+                    "speaker": speaker,
+                })
+        except Exception as e:
+            logger.warning("pyannote failed, falling back to simple_diarize: %s", e)
+            use_pyannote = False
+
+    if not use_pyannote:
+        from app.engines.simple_diarize import classify_gender_from_pitch, simple_diarize
+        segments = simple_diarize(str(wav))
+        segments = classify_gender_from_pitch(str(wav), segments)
+
+    # Save diarization result
+    import json
+    out_path = _job_dir(job_id) / "diarization.json"
+    out_path.write_text(json.dumps(segments, indent=2))
+
+    return {"job_id": job_id, "stage": "diarize", "segments": len(segments), "path": str(out_path)}
+
+
 def _load_source_lang(job_id: str) -> str:
     """Read the job's declared source language from the DB.
 
