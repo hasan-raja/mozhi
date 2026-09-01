@@ -23,7 +23,7 @@ DATA_ROOT = Path("data")
 
 # Quality thresholds
 SNR_FLOOR_DB = 12.0
-DURATION_TOLERANCE = 0.15  # ±15% drift allowed
+DURATION_TOLERANCE = 0.10  # ±10% drift allowed (tightened from 15%)
 
 # Step 18: QC feedback loop — auto-remediation before human review.
 QC_MAX_RETRIES = 2          # re-synth attempts per segment before escalation
@@ -36,7 +36,8 @@ def _job_dir(job_id: str) -> Path:
 
 
 def _resynth_segment_slower(
-    job_id: str, idx: int, text: str, target_lang: str, out_path: Path
+    job_id: str, idx: int, text: str, target_lang: str, out_path: Path,
+    gender: str | None = None
 ) -> float:
     """Re-synthesize ONE segment at a slower rate (Step 18 remediation).
 
@@ -47,7 +48,7 @@ def _resynth_segment_slower(
     try:
         from app.stages.tts_stage import _edge_tts_voice
 
-        voice = _edge_tts_voice(target_lang)
+        voice = _edge_tts_voice(target_lang, gender)
 
         import edge_tts
 
@@ -279,6 +280,7 @@ def run_qc(job_id: str) -> dict[str, Any]:
         idx = entry["index"]
         wav = Path(entry["audio_path"])
         retries = 0
+        gender = entry.get("gender", "unknown")
         if not wav.exists() or wav.stat().st_size == 0:
             logger.warning("qc job=%s seg=%d missing/empty wav — flagging", job_id, idx)
             scores.append({
@@ -331,7 +333,7 @@ def run_qc(job_id: str) -> dict[str, Any]:
                 text = seg_texts.get(idx, "")
                 if text:
                     new_dur = _resynth_segment_slower(
-                        job_id, idx, text, target_lang, wav
+                        job_id, idx, text, target_lang, wav, gender
                     )
                     if new_dur > 0:
                         tts_ms = int(new_dur * 1000)
