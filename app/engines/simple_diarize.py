@@ -124,7 +124,7 @@ def classify_gender_from_pitch(
 
     # Extract pitch using librosa.pyin (robust for speech)
     f0, voiced_flag, voiced_probs = librosa.pyin(
-        y, fmin=librosa.note_to_hz("C2"), fmax=librosa.note_to_hz("C7"), sr=sr
+        y, fmin=float(librosa.note_to_hz("C2")), fmax=float(librosa.note_to_hz("C7")), sr=sr
     )
 
     if f0 is None:
