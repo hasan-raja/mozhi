@@ -75,11 +75,12 @@ def run_vad(self: Any, job_id: str) -> dict[str, Any]:
 
 @stage_task("diarize")
 def run_diarize(self: Any, job_id: str) -> dict[str, Any]:
-    """Speaker diarization + gender classification on extracted audio.
+    """Speaker diarization on extracted audio.
 
     Runs simple_diarize (zero-dep energy clustering) by default.
     When MOZHI_ENABLE_DIARIZATION=true and HF_TOKEN is set, uses pyannote.audio.
-    Output: jobs/{job_id}/diarization.json with speaker + gender per segment.
+    Output: jobs/{job_id}/diarization.json with speaker per segment.
+    Gender classification is deferred to TTS stage where target language is known.
     """
     wav = _job_dir(job_id) / "extract" / "audio.wav"
     if not wav.exists():
@@ -112,11 +113,10 @@ def run_diarize(self: Any, job_id: str) -> dict[str, Any]:
             use_pyannote = False
 
     if not use_pyannote:
-        from app.engines.simple_diarize import classify_gender_from_pitch, simple_diarize
+        from app.engines.simple_diarize import simple_diarize
         segments = simple_diarize(str(wav))
-        segments = classify_gender_from_pitch(str(wav), segments)
 
-    # Save diarization result
+    # Save diarization result (without gender - added later in TTS stage)
     import json
     out_path = _job_dir(job_id) / "diarization.json"
     out_path.write_text(json.dumps(segments, indent=2))

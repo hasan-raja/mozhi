@@ -54,7 +54,8 @@ def test_diarize_simple_mock_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     # Mock run_async to bypass DB
     run_async_pt = _run_async_passthrough()
     with patch("app.tasks.run_async", run_async_pt):
-        result = run_diarize.__wrapped__(JOB)  # type: ignore[attr-defined]
+        with patch("app.task_base.celery_app.send_task"):  # block Redis chaining
+            result = run_diarize.__wrapped__(JOB)  # type: ignore[attr-defined]
 
     assert result["stage"] == "diarize"
     assert "segments" in result
@@ -66,11 +67,12 @@ def test_diarize_simple_mock_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     payload = json.loads(diarization_file.read_text())
     assert isinstance(payload, list)
     assert len(payload) >= 1
-    # Each segment has speaker and gender
+    # Each segment has speaker (gender added later in TTS stage)
     for seg in payload:
         assert "speaker" in seg
-        assert "gender" in seg
-        assert seg["gender"] in ("male", "female", "unknown")
+        assert "start_ms" in seg
+        assert "end_ms" in seg
+        assert seg["end_ms"] > seg["start_ms"]
 
 
 @pytest.mark.skipif(not ffmpeg_available, reason="ffmpeg not on PATH")
@@ -87,7 +89,8 @@ def test_diarize_simple_local_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPat
 
     run_async_pt = _run_async_passthrough()
     with patch("app.tasks.run_async", run_async_pt):
-        result = run_diarize.__wrapped__(JOB)  # type: ignore[attr-defined]
+        with patch("app.task_base.celery_app.send_task"):  # block Redis chaining
+            result = run_diarize.__wrapped__(JOB)  # type: ignore[attr-defined]
 
     assert result["stage"] == "diarize"
     assert "segments" in result
@@ -99,8 +102,9 @@ def test_diarize_simple_local_mode(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     assert len(payload) >= 1
     for seg in payload:
         assert "speaker" in seg
-        assert "gender" in seg
-        assert seg["gender"] in ("male", "female", "unknown")
+        assert "start_ms" in seg
+        assert "end_ms" in seg
+        assert seg["end_ms"] > seg["start_ms"]
 
 
 def test_diarize_missing_audio_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -112,8 +116,11 @@ def test_diarize_missing_audio_raises(tmp_path: Path, monkeypatch: pytest.Monkey
 
     from app.task_base import PermanentStageError
 
-    with pytest.raises(PermanentStageError, match="extracted audio missing"):
-        run_diarize.__wrapped__("ghostjob")  # type: ignore[attr-defined]
+    run_async_pt = _run_async_passthrough()
+    with patch("app.tasks.run_async", run_async_pt):
+        with patch("app.task_base.celery_app.send_task"):  # block Redis chaining
+            with pytest.raises(PermanentStageError, match="extracted audio missing"):
+                run_diarize.__wrapped__("ghostjob")  # type: ignore[attr-defined]
 
 
 def test_diarize_segments_have_speaker_labels(
@@ -129,7 +136,8 @@ def test_diarize_segments_have_speaker_labels(
 
     run_async_pt = _run_async_passthrough()
     with patch("app.tasks.run_async", run_async_pt):
-        run_diarize.__wrapped__(JOB)  # type: ignore[attr-defined]
+        with patch("app.task_base.celery_app.send_task"):  # block Redis chaining
+            run_diarize.__wrapped__(JOB)  # type: ignore[attr-defined]
 
     diarization_file = tmp_path / "data" / "jobs" / JOB / "diarization.json"
     payload = json.loads(diarization_file.read_text())

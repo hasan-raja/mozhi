@@ -109,12 +109,9 @@ def classify_gender_from_pitch(
 ) -> list[SegmentDict]:
     """Heuristic gender classification per segment using pitch (f0).
 
-    Args:
-        audio_path: Path to WAV file
-        segments: List of segments from simple_diarize()
-
-    Returns:
-        Segments with added "gender" key: "male" | "female" | "unknown"
+    Fast path: uses librosa.yin on segment regions only.
+    For even faster classification, call `classify_gender_for_tts()` from TTS stage
+    which only processes segments that actually need gender-specific voices.
     """
     y, sr = librosa.load(str(audio_path), sr=16000, mono=True)
     if len(y) == 0:
@@ -122,37 +119,38 @@ def classify_gender_from_pitch(
             seg["gender"] = "unknown"
         return segments
 
-    # Extract pitch using librosa.pyin (robust for speech)
-    f0, voiced_flag, voiced_probs = librosa.pyin(
-        y, fmin=float(librosa.note_to_hz("C2")), fmax=float(librosa.note_to_hz("C7")), sr=sr
-    )
-
-    if f0 is None:
-        for seg in segments:
-            seg["gender"] = "unknown"
-        return segments
-
-    frame_duration_ms = 512 / sr * 1000  # default hop_length=512
-
     for seg in segments:
-        start_frame = int(seg["start_ms"] / frame_duration_ms)
-        end_frame = int(seg["end_ms"] / frame_duration_ms)
-        end_frame = min(end_frame, len(f0))
+        start_sample = int(seg["start_ms"] / 1000 * sr)
+        end_sample = int(seg["end_ms"] / 1000 * sr)
+        start_sample = max(0, start_sample)
+        end_sample = min(len(y), end_sample)
 
-        if start_frame >= end_frame or start_frame >= len(f0):
+        if end_sample - start_sample < sr * 0.2:  # < 200ms — too short for reliable pitch
             seg["gender"] = "unknown"
             continue
 
-        seg_f0 = f0[start_frame:end_frame]
-        seg_voiced = voiced_flag[start_frame:end_frame]
+        seg_y = y[start_sample:end_sample]
 
-        # Median pitch of voiced frames
-        voiced_f0 = seg_f0[seg_voiced]
-        if len(voiced_f0) == 0:
+        # Fast pitch estimation using librosa.yin (autocorrelation-based)
+        # fmin=80Hz (C2), fmax=300Hz (C4) covers typical speech range
+        try:
+            f0 = librosa.yin(seg_y, fmin=80.0, fmax=300.0, sr=sr)
+        except Exception:
             seg["gender"] = "unknown"
             continue
 
-        median_pitch = np.median(voiced_f0)
+        if f0 is None or len(f0) == 0:
+            seg["gender"] = "unknown"
+            continue
+
+        # Filter unvoiced frames (yin returns high values for unvoiced)
+        # Use median of lower 50% as voiced pitch estimate
+        valid_f0 = f0[f0 > 0]
+        if len(valid_f0) == 0:
+            seg["gender"] = "unknown"
+            continue
+
+        median_pitch = float(np.median(valid_f0))
 
         # Heuristic thresholds (Hz) — typical adult ranges
         # Male: ~85-180 Hz, Female: ~165-255 Hz
@@ -164,6 +162,69 @@ def classify_gender_from_pitch(
             seg["gender"] = "unknown"  # overlap zone
 
     logger.info("classify_gender: %s", [s.get("gender") for s in segments])
+    return segments
+
+
+def classify_gender_for_tts(
+    audio_path: str | Path,
+    segments: list[SegmentDict],
+    target_langs: list[str],
+    job_id: str = "",
+) -> list[SegmentDict]:
+    """Lazy gender classification: only classify segments that need gender-specific voices.
+
+    Memory-efficient: loads audio once, processes per-segment slices.
+    Only runs for languages that actually have male/female voices.
+    """
+    # Languages with gender-specific Edge TTS voices
+    gender_langs = {"ta", "hi", "te", "kn", "ml", "bn", "mr"}
+    needs_gender = any(lang in gender_langs for lang in target_langs)
+    if not needs_gender:
+        for seg in segments:
+            seg.setdefault("gender", "unknown")
+        return segments
+
+    import librosa
+    import numpy as np
+
+    logger.info("classify_gender_for_tts: job=%s segments=%d", job_id, len(segments))
+
+    # Load audio once but process per-segment to limit memory
+    y, sr = librosa.load(str(audio_path), sr=16000, mono=True)
+
+    for seg in segments:
+        start_sample = int(seg["start_ms"] / 1000 * sr)
+        end_sample = int(seg["end_ms"] / 1000 * sr)
+        start_sample = max(0, min(start_sample, len(y) - 1))
+        end_sample = max(start_sample + 1, min(end_sample, len(y)))
+        seg_y = y[start_sample:end_sample]
+
+        if len(seg_y) < sr * 0.1:  # <100ms - too short for reliable pitch
+            seg["gender"] = "unknown"
+            continue
+
+        try:
+            f0 = librosa.yin(
+                seg_y,
+                fmin=librosa.note_to_hz("C2"),
+                fmax=librosa.note_to_hz("C5"),
+                sr=sr,
+            )
+            f0_voiced = f0[f0 > 0]
+            if len(f0_voiced) == 0:
+                seg["gender"] = "unknown"
+                continue
+            median_f0 = float(np.median(f0_voiced))
+            if median_f0 < 165:
+                seg["gender"] = "male"
+            elif median_f0 > 255:
+                seg["gender"] = "female"
+            else:
+                seg["gender"] = "unknown"
+        except Exception:
+            seg["gender"] = "unknown"
+
+    logger.info("classify_gender: job=%s result=%s", job_id, [s.get("gender") for s in segments])
     return segments
 
 

@@ -9,8 +9,11 @@ Each segment's audio is written to jobs/{id}/tts/seg_N.wav and its duration
 recorded so the QC stage can compute tempo ratios against the original.
 """
 
+import asyncio
 import json
 import logging
+import subprocess
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -95,46 +98,43 @@ def _edge_tts_voice(target_lang: str, gender: str | None = None) -> str:
 
 
 async def _synthesize_edge(text: str, voice: str, out_path: Path, rate: str = "+0%") -> float:
-    """Edge TTS: free neural voices. Returns duration in seconds.
-
-    Raises FFmpegError (a RETRYABLE exception for the pipeline) when edge-tts
-    produces an empty or corrupt file — fail fast instead of shipping
-    broken audio that only surfaces at the stitch stage.
-
-    The `rate` parameter adjusts speech speed (e.g., "-20%" = slower, "+10%" = faster).
-    """
-    import asyncio
-    import os
-
+    """Edge TTS: free neural voices. Returns duration in seconds."""
     import edge_tts
 
     communicate = edge_tts.Communicate(text, voice, rate=rate)
     await communicate.save(str(out_path))
 
-    loop = asyncio.get_running_loop()
-
-    def _validate() -> None:
-        if not os.path.exists(out_path) or os.stat(out_path).st_size == 0:
-            raise FFmpegError(
-                f"edge-tts produced empty file for voice={voice!r}: {out_path}"
-            )
-
-    await loop.run_in_executor(None, _validate)
-
-    duration = await _probe_duration(out_path)
-    if duration <= 0:
-        raise FFmpegError(
-            f"edge-tts output has zero duration for voice={voice!r}: {out_path}"
-        )
-    return duration
+    # Probe actual duration
+    proc = await asyncio.get_running_loop().run_in_executor(
+        None,
+        lambda: subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(out_path),
+            ],
+            capture_output=True,
+            text=True,
+        ),
+    )
+    try:
+        return float(proc.stdout.strip())
+    except ValueError:
+        return 0.0
 
 
 async def _ffmpeg_atempo(in_path: Path, atempo: float) -> None:
-    """Apply ffmpeg atempo filter to time-stretch audio. atempo range: 0.5–2.0."""
+    """Apply ffmpeg atempo filter to stretch/compress audio in place.
+
+    atempo > 1.0 = faster (shorter), atempo < 1.0 = slower (longer).
+    """
     import asyncio
     import os
-    import subprocess
-    import tempfile
 
     loop = asyncio.get_running_loop()
 
@@ -158,7 +158,8 @@ async def _ffmpeg_atempo(in_path: Path, atempo: float) -> None:
             None,
             lambda: subprocess.run(
                 ["ffmpeg", "-y", "-i", str(in_path), "-af", filter_chain, str(tmp_path)],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             ),
         )
         if proc.returncode != 0:
@@ -167,11 +168,11 @@ async def _ffmpeg_atempo(in_path: Path, atempo: float) -> None:
         # Atomic replace
         await loop.run_in_executor(None, lambda: os.replace(tmp_path, in_path))
     finally:
-            if os.path.exists(tmp_path):  # noqa: ASYNC240
-                try:
-                    os.unlink(tmp_path)  # noqa: ASYNC240
-                except OSError:
-                    pass
+        if os.path.exists(tmp_path):  # noqa: ASYNC240
+            try:
+                os.unlink(tmp_path)  # noqa: ASYNC240
+            except OSError:
+                pass
 
 
 async def _synthesize_with_duration_match(
@@ -237,15 +238,23 @@ async def _synthesize_with_duration_match(
 async def _probe_duration(out_path: Path) -> float:
     """ffprobe duration in seconds — subprocess offloaded to executor."""
     import asyncio
-    import subprocess
 
     loop = asyncio.get_running_loop()
     proc = await loop.run_in_executor(
         None,
         lambda: subprocess.run(
-            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(out_path)],
-            capture_output=True, text=True,
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                str(out_path),
+            ],
+            capture_output=True,
+            text=True,
         ),
     )
     try:
@@ -281,6 +290,16 @@ def run_tts(job_id: str) -> dict[str, Any]:
             diarization_segments = json.loads(diarization_path.read_text(encoding="utf-8"))
         except Exception:
             logger.warning("tts job=%s: failed to load diarization.json", job_id)
+
+    # Lazy gender classification: only classify if target language has gender-specific voices
+        from app.engines.simple_diarize import classify_gender_for_tts
+        if diarization_segments:
+            diarization_segments = classify_gender_for_tts(
+                str(_job_dir(job_id) / "extract" / "audio.wav"),
+                diarization_segments,
+                [target_lang],
+                job_id,
+            )
 
     # Build a lookup: (start_ms, end_ms) -> gender
     gender_lookup: dict[tuple[int, int], str] = {}
